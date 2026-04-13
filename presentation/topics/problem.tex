@@ -1,1 +1,25 @@
 \section{The Problem}
+
+\begin{frame}{Project Goal and Motivation}
+	\begin{itemize}
+		\item Goal: predict vaccination probabilities for two outcomes using survey responses:
+		\begin{itemize}
+			\item H1N1 vaccine uptake
+			\item Seasonal flu vaccine uptake
+		\end{itemize}
+		\item Data source: National 2009 H1N1 Flu Survey (NHFS), collected during the 2009--2010 pandemic season.
+		\item Public health motivation: identify characteristics associated with likely and unlikely vaccine uptake to inform outreach planning.
+	\end{itemize}
+\end{frame}
+
+\begin{frame}{Challenge Framing and Evaluation}
+	\begin{itemize}
+		\item This is a multilabel prediction task with two binary labels:
+		\begin{itemize}
+			\item \texttt{h1n1\_vaccine} and \texttt{seasonal\_vaccine}
+		\end{itemize}
+		\item Outputs must be probabilities in $[0,1]$, not hard class labels.
+		\item Planned model comparison metric: macro ROC AUC (mean AUC across both labels).
+		\item Proposal scope: model design, evaluation plan, and expected interpretation (no final empirical claims yet).
+	\end{itemize}
+\end{frame}

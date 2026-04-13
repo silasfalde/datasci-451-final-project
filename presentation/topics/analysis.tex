@@ -1,1 +1,51 @@
 \section{Analysis}
+
+\begin{frame}{Planned Bayesian Hierarchical Model}
+	\small
+	For respondent $i$ in group $g(i)$, and outcome $k \in \{\text{H1N1},\text{Seasonal}\}$:
+	$$
+		y_{ik} \sim \mathrm{Bernoulli}(p_{ik}), \qquad
+		\mathrm{logit}(p_{ik}) = \alpha_k + \mathbf{x}_i^\top \boldsymbol{\beta}_k + u_{g(i),k}
+	$$
+	$$
+		u_{g,k} \sim \mathcal{N}(0,\sigma_{u,k}^2), \qquad
+		\beta_{j,k} \sim \mathcal{N}(0,\tau_k^2)
+	$$
+	\begin{itemize}
+		\item Partial pooling allows stable estimates for smaller subgroups.
+		\item Candidate group structure: HHS region and selected demographic strata.
+		\item Priors will be weakly informative to regularize high-dimensional predictors.
+	\end{itemize}
+\end{frame}
+
+\begin{frame}{Inference and Model-Checking Plan}
+	\begin{itemize}
+		\item Inference approach: MCMC posterior sampling (NUTS) for both outcomes.
+		\item Planned diagnostics:
+		\begin{itemize}
+			\item Convergence checks with $\hat{R}$ near 1.00 and sufficient effective sample size.
+			\item Posterior predictive checks for calibration and distributional fit.
+			\item Sensitivity analysis under alternative prior scales.
+		\end{itemize}
+		\item Outputs to interpret:
+		\begin{itemize}
+			\item Posterior means/intervals for key predictors.
+			\item Group-level random effect uncertainty.
+			\item Predicted vaccination probabilities with credible intervals.
+		\end{itemize}
+	\end{itemize}
+\end{frame}
+
+\begin{frame}{Planned Baselines and Comparison Criteria}
+	\begin{itemize}
+		\item Baseline 1: regularized logistic regression.
+		\item Baseline 2: random forest classifier.
+		\item Proposed comparison dimensions:
+		\begin{itemize}
+			\item Predictive performance: macro ROC AUC across both vaccine targets.
+			\item Calibration quality of predicted probabilities.
+			\item Interpretability and uncertainty quantification for public health use.
+		\end{itemize}
+		\item Hypothesis: hierarchical Bayesian model will offer stronger uncertainty-aware interpretation with competitive predictive performance.
+	\end{itemize}
+\end{frame}
