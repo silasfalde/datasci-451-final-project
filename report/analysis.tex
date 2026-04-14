@@ -1,0 +1,62 @@
+\section{Analysis}
+
+\subsection{Bayesian Joint Multivariate Hierarchical Model}
+
+Our primary model predicts two binary outcomes for each respondent $i$: H1N1 uptake and seasonal flu uptake. Let $k \in \{1,2\}$ index these outcomes. We directly model cross-outcome dependence with a joint multivariate hierarchical specification:
+\[
+\mathrm{logit}(p_{ik}) = \alpha_k + \mathbf{x}_i^\top \boldsymbol{\beta}_k + u_{g(i),k} + r_{i,k},
+\qquad
+y_{ik} \sim \mathrm{Bernoulli}(p_{ik}),
+\]
+
+The terms have the following interpretation:
+\begin{itemize}
+\item $\alpha_k$ is the outcome-specific intercept (baseline log-odds).
+\item $\mathbf{x}_i^\top \boldsymbol{\beta}_k$ captures respondent-level covariate effects.
+\item $u_{g(i),k}$ is a group-specific deviation for the group containing respondent $i$ (for example, region and selected demographic strata).
+\item $r_{i,k}$ is an individual-level residual term that allows association between the two outcomes after adjusting for observed predictors.
+\end{itemize}
+
+The hierarchical components are
+\[
+\mathbf{u}_g =
+\begin{bmatrix}
+u_{g,1}\\
+u_{g,2}
+\end{bmatrix}
+\sim
+\mathcal{N}(\mathbf{0},\Sigma_u),
+\qquad
+\mathbf{r}_i =
+\begin{bmatrix}
+r_{i,1}\\
+r_{i,2}
+\end{bmatrix}
+\sim
+\mathcal{N}(\mathbf{0},\Sigma_r).
+\]
+
+For outcome-specific coefficients, we use a multivariate prior by predictor:
+\[
+\begin{bmatrix}
+\beta_{j,1}\\
+\beta_{j,2}
+\end{bmatrix}
+\sim
+\mathcal{N}(\mathbf{0},\Sigma_\beta).
+\]
+
+Each covariance matrix is parameterized as
+\[
+\Sigma = D R D,
+\]
+where $D$ is diagonal with standard deviations and $R$ is a correlation matrix with an LKJ prior, for example $R \sim \mathrm{LKJ}(\eta)$.
+
+This structure provides partial pooling across groups, regularization across predictors, and explicit modeling of correlation between H1N1 and seasonal vaccination behavior. In practice, it stabilizes estimates for small subgroups, limits extreme coefficient values in high-dimensional settings, and yields uncertainty-aware predictions through posterior distributions.
+
+The joint construction offers three practical benefits:
+\begin{itemize}
+\item borrowing strength across outcomes when one outcome has weaker signal,
+\item better-calibrated uncertainty in small subgroups,
+\item direct posterior inference on cross-outcome dependence relevant to public-health interpretation.
+\end{itemize}

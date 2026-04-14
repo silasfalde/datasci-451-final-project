@@ -1,36 +1,40 @@
 \section{Analysis}
 
-\begin{frame}{Planned Bayesian Hierarchical Model}
+\begin{frame}{Joint Multivariate Hierarchical Model}
 	\small
 	For respondent $i$ in group $g(i)$, and outcome $k \in \{\text{H1N1},\text{Seasonal}\}$:
 	$$
-		y_{ik} \sim \mathrm{Bernoulli}(p_{ik}), \qquad
-		\mathrm{logit}(p_{ik}) = \alpha_k + \mathbf{x}_i^\top \boldsymbol{\beta}_k + u_{g(i),k}
+		\mathrm{logit}(p_{ik}) = \alpha_k + \mathbf{x}_i^\top \boldsymbol{\beta}_k + u_{g(i),k} + r_{i,k}, \qquad
+		y_{ik} \sim \mathrm{Bernoulli}(p_{ik})
 	$$
 	$$
-		u_{g,k} \sim \mathcal{N}(0,\sigma_{u,k}^2), \qquad
-		\beta_{j,k} \sim \mathcal{N}(0,\tau_k^2)
+		\mathbf{u}_g = (u_{gk}) \sim \mathcal{N}(\mathbf{0},\Sigma_u), \quad
+		\mathbf{r}_i = (r_{ik}) \sim \mathcal{N}(\mathbf{0},\Sigma_r)
+	$$
+	$$
+		(\beta_{jk}) \sim \mathcal{N}(\mathbf{0},\Sigma_\beta), \qquad
+		\Sigma = D R D,\; R \sim \mathrm{LKJ}(\eta)
 	$$
 	\begin{itemize}
+		\item Directly models cross-outcome dependence between the two vaccine outcomes.
 		\item Partial pooling allows stable estimates for smaller subgroups.
 		\item Candidate group structure: HHS region and selected demographic strata.
-		\item Priors will be weakly informative to regularize high-dimensional predictors.
 	\end{itemize}
 \end{frame}
 
 \begin{frame}{Inference and Model-Checking Plan}
 	\begin{itemize}
-		\item Inference approach: MCMC posterior sampling (NUTS) for both outcomes.
+		\item Inference approach: MCMC posterior sampling (NUTS) for the joint model.
 		\item Planned diagnostics:
 		\begin{itemize}
 			\item Convergence checks with $\hat{R}$ near 1.00 and sufficient effective sample size.
 			\item Posterior predictive checks for calibration and distributional fit.
-			\item Sensitivity analysis under alternative prior scales.
+			\item Sensitivity analysis under alternative prior and LKJ correlation scales.
 		\end{itemize}
 		\item Outputs to interpret:
 		\begin{itemize}
 			\item Posterior means/intervals for key predictors.
-			\item Group-level random effect uncertainty.
+			\item Group-level random effect uncertainty and cross-outcome correlations.
 			\item Predicted vaccination probabilities with credible intervals.
 		\end{itemize}
 	\end{itemize}
@@ -46,6 +50,6 @@
 			\item Calibration quality of predicted probabilities.
 			\item Interpretability and uncertainty quantification for public health use.
 		\end{itemize}
-		\item Hypothesis: hierarchical Bayesian model will offer stronger uncertainty-aware interpretation with competitive predictive performance.
+		\item Hypothesis: joint multivariate Bayesian model will offer stronger uncertainty-aware interpretation with competitive predictive performance.
 	\end{itemize}
 \end{frame}
