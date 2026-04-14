@@ -1,0 +1,45 @@
+digraph VaccineModelFlow {
+  rankdir=TB;
+  graph [fontsize=14, labelloc="t", label="Bayesian Model Data Flow", ranksep=0.5, nodesep=0.15, ratio=fill, pad=0.03];
+  node [shape=box, style="rounded,filled", color="#2f4f4f", fillcolor="#e8f1f8", fontname="Helvetica", fontsize=13, margin="0.06,0.04"];
+  edge [color="#4a5568", arrowsize=0.8, penwidth=1.1];
+
+  indiv [label="Individual data\n(x_i, respondent i)"];
+  group_map [label="Group mapping\n(g(i))"];
+  grouped [label="Group-level structure\n(partial pooling by g)"];
+
+  alpha [label="Outcome intercepts\n(alpha_k)"];
+  beta [label="Feature effects\n(beta_jk)"];
+  u [label="Group effects\n(u_gk)"];
+  r [label="Individual residuals\n(r_ik)"];
+
+  sigma_u [label="Sigma_u (corr. of u_gk)"];
+  sigma_r [label="Sigma_r (corr. of r_ik)"];
+  sigma_b [label="Sigma_beta (corr. of beta_jk)"];
+
+  eta [label="Linear predictor\neta_ik = alpha_k + x_i^T beta_k + u_g(i),k + r_ik"];
+  prob [label="Outcome probabilities\np_ik = logistic(eta_ik)"];
+  y1 [label="Outcome data\ny_i1 (H1N1)"];
+  y2 [label="Outcome data\ny_i2 (Seasonal)"];
+  posterior [label="Posterior inference\n(NUTS)"];
+
+  indiv -> group_map;
+  group_map -> grouped;
+
+  indiv -> eta;
+  alpha -> eta;
+  beta -> eta;
+  grouped -> u;
+  u -> eta;
+  r -> eta;
+
+  sigma_u -> u;
+  sigma_r -> r;
+  sigma_b -> beta;
+
+  eta -> prob;
+  prob -> y1;
+  prob -> y2;
+  y1 -> posterior;
+  y2 -> posterior;
+}
