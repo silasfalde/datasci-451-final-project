@@ -1,2 +1,2 @@
 n_fits,all_checks_pass_rate,max_rhat_observed,min_ess_bulk_observed,min_ess_tail_observed,total_divergences,total_treedepth_saturated,mean_pred_ci_width,median_pred_ci_width,mean_group_sd
-2,0.0,,,,0,0,0.054678404047216335,0.05248879556938194,0.055260879745147276
+2,0.5,1.0024752212293428,350.93953506830957,350.93953506830957,0,1,0.05454047318929961,0.052389145208851934,0.05678463735640017

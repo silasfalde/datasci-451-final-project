@@ -1,3 +1,3 @@
-fold,outcome,max_rhat,min_bulk_ess,min_tail_ess,rhat_ok,ess_bulk_ok,ess_tail_ok,hmc_ok,all_checks_pass,rhat_metric,ess_bulk_metric,ess_tail_metric,divergences_metric,treedepth_metric
-1,h1n1_vaccine,,,,False,False,False,True,False,,,,0,0
-1,seasonal_vaccine,,,,False,False,False,True,False,,,,0,0
+fold,outcome,max_rhat,min_bulk_ess,min_tail_ess,divergences,treedepth_saturated,rhat_ok,ess_bulk_ok,ess_tail_ok,hmc_ok,all_checks_pass,rhat_metric,ess_bulk_metric,ess_tail_metric,divergences_metric,treedepth_metric
+1,h1n1_vaccine,1.0012724105497952,507.90063537683506,507.90063537683506,0,0,True,True,True,True,True,1.0012724105497952,507.90063537683506,507.90063537683506,0,0
+1,seasonal_vaccine,1.0024752212293428,350.93953506830957,350.93953506830957,0,1,True,False,False,False,False,1.0024752212293428,350.93953506830957,350.93953506830957,0,1

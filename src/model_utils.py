@@ -55,6 +55,125 @@ def _safe_summary(fit):
         return None
 
 
+def _rhat_from_chains(samples_by_chain):
+    """Compute split-free Gelman-Rubin R-hat from (draws, chains) samples."""
+    x = np.asarray(samples_by_chain, dtype=float)
+    if x.ndim != 2:
+        return np.nan
+
+    n_draws, n_chains = x.shape
+    if n_draws < 2 or n_chains < 2:
+        return np.nan
+
+    chain_means = np.nanmean(x, axis=0)
+    chain_vars = np.nanvar(x, axis=0, ddof=1)
+    w = np.nanmean(chain_vars)
+    if not np.isfinite(w) or w <= 0:
+        return np.nan
+
+    b = n_draws * np.nanvar(chain_means, ddof=1)
+    var_hat = ((n_draws - 1) / n_draws) * w + (b / n_draws)
+    if not np.isfinite(var_hat) or var_hat <= 0:
+        return np.nan
+
+    return float(np.sqrt(var_hat / w))
+
+
+def _ess_lag1_from_chains(samples_by_chain):
+    """Approximate effective sample size from mean lag-1 autocorrelation."""
+    x = np.asarray(samples_by_chain, dtype=float)
+    if x.ndim != 2:
+        return np.nan
+
+    n_draws, n_chains = x.shape
+    if n_draws < 3 or n_chains < 1:
+        return np.nan
+
+    centered = x - np.nanmean(x, axis=0, keepdims=True)
+    denom = np.nansum(centered * centered, axis=0)
+    numer = np.nansum(centered[1:] * centered[:-1], axis=0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        rho1_per_chain = numer / denom
+
+    rho1 = float(np.nanmean(rho1_per_chain))
+    if not np.isfinite(rho1):
+        return np.nan
+
+    rho1 = float(np.clip(rho1, -0.99, 0.99))
+    ess = (n_draws * n_chains) * (1.0 - rho1) / (1.0 + rho1)
+    return float(np.clip(ess, 1.0, float(n_draws * n_chains)))
+
+
+def _extract_diagnostics_from_draws(fit):
+    """Fallback diagnostics for PyStan 3 using internal chain draws."""
+    diagnostics = {
+        "max_rhat": np.nan,
+        "min_bulk_ess": np.nan,
+        "min_tail_ess": np.nan,
+        "divergences": 0,
+        "treedepth_saturated": 0,
+    }
+
+    draws = getattr(fit, "_draws", None)
+
+    all_names = []
+    try:
+        all_names = list(fit.to_frame().columns)
+    except Exception:
+        pass
+    if draws is not None and (len(all_names) != int(np.asarray(draws).shape[0])):
+        all_names = []
+
+    if not all_names:
+        all_names = list(getattr(fit, "sample_and_sampler_param_names", []))
+
+    if draws is None or len(all_names) == 0:
+        return diagnostics
+
+    # Parameter diagnostics from core model parameters only (exclude p_test and sampler stats).
+    def _is_model_param(sample_name):
+        return (
+            sample_name == "alpha"
+            or sample_name == "sigma_u"
+            or sample_name.startswith("beta.")
+            or sample_name.startswith("z_u.")
+        )
+
+    model_idx = [i for i, name in enumerate(all_names) if _is_model_param(name)]
+    rhats = []
+    esses = []
+    for i in model_idx:
+        # _draws layout: (variables, samples, chains)
+        var_draws = np.asarray(draws[i], dtype=float)
+        rhat_val = _rhat_from_chains(var_draws)
+        ess_val = _ess_lag1_from_chains(var_draws)
+        if np.isfinite(rhat_val):
+            rhats.append(rhat_val)
+        if np.isfinite(ess_val):
+            esses.append(ess_val)
+
+    if rhats:
+        diagnostics["max_rhat"] = float(np.max(rhats))
+    if esses:
+        min_ess = float(np.min(esses))
+        diagnostics["min_bulk_ess"] = min_ess
+        diagnostics["min_tail_ess"] = min_ess
+
+    # Sampler diagnostics if present.
+    for name in ("divergent__", "diverging__", "divergence__"):
+        if name in all_names:
+            idx = all_names.index(name)
+            diagnostics["divergences"] = int(np.nansum(np.asarray(draws[idx], dtype=float)))
+            break
+
+    if "treedepth__" in all_names:
+        idx = all_names.index("treedepth__")
+        treedepth_vals = np.asarray(draws[idx], dtype=float)
+        diagnostics["treedepth_saturated"] = int(np.nansum(treedepth_vals >= 10))
+
+    return diagnostics
+
+
 def _extract_diagnostics(fit):
     """Extract lightweight convergence diagnostics from Stan fit."""
     summary = _safe_summary(fit)
@@ -62,15 +181,17 @@ def _extract_diagnostics(fit):
         "max_rhat": np.nan,
         "min_bulk_ess": np.nan,
         "min_tail_ess": np.nan,
+        "divergences": 0,
+        "treedepth_saturated": 0,
     }
 
     if not summary:
-        return diagnostics
+        return _extract_diagnostics_from_draws(fit)
 
     cols = summary.get("summary_colnames", [])
     vals = np.asarray(summary.get("summary", []))
     if vals.size == 0 or len(cols) == 0:
-        return diagnostics
+        return _extract_diagnostics_from_draws(fit)
 
     idx = {name: i for i, name in enumerate(cols)}
 
@@ -80,6 +201,19 @@ def _extract_diagnostics(fit):
         diagnostics["min_bulk_ess"] = float(np.nanmin(vals[:, idx["ESS_bulk"]]))
     if "ESS_tail" in idx:
         diagnostics["min_tail_ess"] = float(np.nanmin(vals[:, idx["ESS_tail"]]))
+
+    # If summary is unavailable/incomplete under a backend, use draw-based fallback.
+    if (
+        not np.isfinite(diagnostics["max_rhat"])
+        or not np.isfinite(diagnostics["min_bulk_ess"])
+        or not np.isfinite(diagnostics["min_tail_ess"])
+    ):
+        fallback = _extract_diagnostics_from_draws(fit)
+        for key in ("max_rhat", "min_bulk_ess", "min_tail_ess"):
+            if not np.isfinite(diagnostics[key]) and np.isfinite(fallback[key]):
+                diagnostics[key] = fallback[key]
+        diagnostics["divergences"] = fallback["divergences"]
+        diagnostics["treedepth_saturated"] = fallback["treedepth_saturated"]
 
     return diagnostics
 
