@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import inspect
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from config import CONFIG
@@ -186,15 +187,6 @@ def fit_bayesian(train_df, test_df, outcome):
             "PyStan is required for fit_bayesian. Install with `pip install pystan`."
         ) from exc
 
-    # PyStan invokes asyncio internally; Jupyter already runs an event loop.
-    # Patch the loop when available to avoid `asyncio.run()` RuntimeError.
-    try:
-        import nest_asyncio
-
-        nest_asyncio.apply()
-    except ImportError:
-        pass
-
     group_col = CONFIG["group_col"]
     id_col = CONFIG["id_col"]
 
@@ -251,17 +243,54 @@ def fit_bayesian(train_df, test_df, outcome):
         "beta_sd": float(CONFIG["bayes"].get("prior_sd", 1.0)),
     }
 
-    posterior = stan.build(
-        STAN_HIER_LOGIT,
-        data=stan_data,
-        random_seed=CONFIG["seed"],
-    )
+    bayes_cfg = CONFIG.get("bayes", {})
+    chains = int(bayes_cfg.get("chains", 2))
+    parallel_chains = int(bayes_cfg.get("parallel_chains", chains))
+    num_cores = int(bayes_cfg.get("num_cores", parallel_chains))
 
-    fit = posterior.sample(
-        num_chains=CONFIG["bayes"]["chains"],
-        num_samples=CONFIG["bayes"]["draws"],
-        num_warmup=CONFIG["bayes"]["tune"],
-    )
+    # Pass only kwargs supported by the active stan backend.
+    build_kwargs = {
+        "data": stan_data,
+        "random_seed": CONFIG["seed"],
+    }
+    build_sig = inspect.signature(stan.build)
+    if (
+        bayes_cfg.get("use_opencl", False)
+        and "opencl_ids" in build_sig.parameters
+    ):
+        build_kwargs["opencl_ids"] = (
+            int(bayes_cfg.get("opencl_platform_id", 0)),
+            int(bayes_cfg.get("opencl_device_id", 0)),
+        )
+
+    sample_kwargs = {
+        "num_chains": chains,
+        "num_samples": int(bayes_cfg.get("draws", 700)),
+        "num_warmup": int(bayes_cfg.get("tune", 350)),
+    }
+
+    def _build_and_sample():
+        posterior = stan.build(STAN_HIER_LOGIT, **build_kwargs)
+        sample_sig = inspect.signature(posterior.sample)
+        local_sample_kwargs = dict(sample_kwargs)
+        if "num_cores" in sample_sig.parameters:
+            local_sample_kwargs["num_cores"] = num_cores
+        if "num_chains" in sample_sig.parameters and "parallel_chains" in sample_sig.parameters:
+            local_sample_kwargs["num_chains"] = chains
+            local_sample_kwargs["parallel_chains"] = parallel_chains
+        return posterior.sample(**local_sample_kwargs)
+
+    # Run Stan in a fresh worker thread to avoid Jupyter event-loop conflicts.
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        fit = executor.submit(_build_and_sample).result()
+
+    if fit is None:
+        raise RuntimeError(
+            "Stan sampling returned no fit object. Check the notebook stderr output for the "
+            "underlying compiler/sampler error and retry with fewer cores/chains if needed."
+        )
 
     p_test = fit["p_test"]
     y_pred_proba, pred_ci_lower, pred_ci_upper = _posterior_pred_summary(
@@ -281,4 +310,140 @@ def fit_bayesian(train_df, test_df, outcome):
         "beta_summary": beta_summary,
         "sigma_u_summary": sigma_u_summary,
         "feature_names": list(X_train.columns),
+    }
+
+
+def run_training_pipeline(df, folds, config=None, verbose=True):
+    """Run CV training for baseline and Bayesian models and collect outputs."""
+    from data_utils import preprocess_for_baseline, preprocess_for_bayesian, get_X_y
+
+    cfg = CONFIG if config is None else config
+
+    all_predictions = []
+    bayes_diagnostics = []
+    bayes_effect_summaries = []
+
+    if verbose:
+        print("Bayesian fits run serially per outcome; intra-fit parallelism is controlled by Stan chains/cores.")
+
+    for fold_idx, fold_data in enumerate(folds):
+        if verbose:
+            print(f"Fold {fold_idx+1}/{len(folds)}")
+
+        train_idx, test_idx = fold_data["train"], fold_data["test"]
+        train_df = df.iloc[train_idx].reset_index(drop=True)
+        test_df = df.iloc[test_idx].reset_index(drop=True)
+
+        for outcome in cfg["outcomes"]:
+            train_base, test_base = preprocess_for_baseline(train_df, test_df, outcome)
+            X_train_base, y_train_base = get_X_y(train_base, outcome)
+            X_test_base, y_test_base = get_X_y(test_base, outcome)
+
+            log_result = fit_logistic(X_train_base, y_train_base, X_test_base)
+            log_preds = np.clip(log_result["predictions"], 1e-6, 1 - 1e-6)
+            all_predictions.append(
+                pd.DataFrame(
+                    {
+                        "respondent_id": test_df["respondent_id"].values,
+                        "fold": fold_idx + 1,
+                        "outcome": outcome,
+                        "model": "logistic_ridge",
+                        "truth": y_test_base.values,
+                        "prediction": log_preds,
+                    }
+                )
+            )
+
+            rf_result = fit_random_forest(
+                X_train_base,
+                y_train_base,
+                X_test_base,
+                seed=cfg["seed"] + fold_idx,
+            )
+            rf_preds = np.clip(rf_result["predictions"], 1e-6, 1 - 1e-6)
+            all_predictions.append(
+                pd.DataFrame(
+                    {
+                        "respondent_id": test_df["respondent_id"].values,
+                        "fold": fold_idx + 1,
+                        "outcome": outcome,
+                        "model": "random_forest",
+                        "truth": y_test_base.values,
+                        "prediction": rf_preds,
+                    }
+                )
+            )
+
+            if fold_idx < cfg["max_bayes_folds"]:
+                train_bayes, test_bayes = preprocess_for_bayesian(train_df, test_df, outcome)
+                bayes_result = fit_bayesian(train_bayes, test_bayes, outcome)
+                bayes_preds = np.clip(bayes_result["predictions"], 1e-6, 1 - 1e-6)
+
+                all_predictions.append(
+                    pd.DataFrame(
+                        {
+                            "respondent_id": test_bayes["respondent_id"].values,
+                            "fold": fold_idx + 1,
+                            "outcome": outcome,
+                            "model": "bayesian_hierarchical",
+                            "truth": test_bayes[outcome].values,
+                            "prediction": bayes_preds,
+                            "pred_ci_lower": bayes_result["prediction_ci_lower"],
+                            "pred_ci_upper": bayes_result["prediction_ci_upper"],
+                        }
+                    )
+                )
+
+                bayes_diagnostics.append(
+                    {
+                        "fold": fold_idx + 1,
+                        "outcome": outcome,
+                        **bayes_result["diagnostics"],
+                    }
+                )
+
+                sigma_summary = bayes_result["sigma_u_summary"]
+                if sigma_summary is not None:
+                    bayes_effect_summaries.append(
+                        {
+                            "fold": fold_idx + 1,
+                            "outcome": outcome,
+                            "group_sd_mean": float(np.asarray(sigma_summary["mean"]).squeeze()),
+                            "group_sd_ci_lower": float(np.asarray(sigma_summary["ci_lower"]).squeeze()),
+                            "group_sd_ci_upper": float(np.asarray(sigma_summary["ci_upper"]).squeeze()),
+                        }
+                    )
+
+                beta_summary = bayes_result.get("beta_summary")
+                if beta_summary is not None:
+                    beta_means = np.asarray(beta_summary["mean"]).ravel()
+                    feature_names = bayes_result.get("feature_names", [])
+                    if len(feature_names) == len(beta_means) and len(feature_names) > 0:
+                        top_idx = np.argsort(np.abs(beta_means))[-3:][::-1]
+                        for j in top_idx:
+                            bayes_effect_summaries.append(
+                                {
+                                    "fold": fold_idx + 1,
+                                    "outcome": outcome,
+                                    "feature": feature_names[j],
+                                    "beta_mean": float(beta_means[j]),
+                                    "beta_ci_lower": float(np.asarray(beta_summary["ci_lower"]).ravel()[j]),
+                                    "beta_ci_upper": float(np.asarray(beta_summary["ci_upper"]).ravel()[j]),
+                                }
+                            )
+
+    pred_df = pd.concat(all_predictions, ignore_index=True)
+
+    if verbose:
+        print(f"✓ Training complete, collected {len(pred_df)} predictions")
+        print(f"✓ Bayesian fits completed: {len(bayes_diagnostics)}")
+        print(
+            f"✓ Bayesian prior scale in use (for sensitivity analysis): "
+            f"{cfg['bayes'].get('prior_sd', 1.0)}"
+        )
+
+    return {
+        "pred_df": pred_df,
+        "bayes_diagnostics": bayes_diagnostics,
+        "bayes_effect_summaries": bayes_effect_summaries,
     }

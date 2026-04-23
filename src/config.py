@@ -27,6 +27,11 @@ CONFIG = {
         "draws": 700,
         "tune": 350,
         "chains": 2,
+        "parallel_chains": 2,
+        "num_cores": 2,
+        "use_opencl": True,
+        "opencl_platform_id": 0,
+        "opencl_device_id": 0,
         "prior_sd": 1.0,
     },
 }
